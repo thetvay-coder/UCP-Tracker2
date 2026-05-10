@@ -622,6 +622,29 @@
             const todayCases = allCases.filter(c => c.date === today);
             const todayPoints = todayCases.reduce((sum, c) => sum + c.points, 0);
 
+            // Calculate monthly total
+            const currentMonth = today.substring(0, 7); // YYYY-MM
+            const monthCases = allCases.filter(c => c.date.startsWith(currentMonth));
+            const monthPoints = monthCases.reduce((sum, c) => sum + c.points, 0);
+
+            // Calculate quarterly total
+            const currentDate = new Date(today + 'T12:00:00');
+            const currentYear = currentDate.getFullYear();
+            const currentMonthNum = currentDate.getMonth(); // 0-11
+            const quarter = Math.floor(currentMonthNum / 3) + 1;
+            const quarterStart = new Date(currentYear, (quarter - 1) * 3, 1);
+            const quarterEnd = new Date(currentYear, quarter * 3, 0);
+            
+            const quarterCases = allCases.filter(c => {
+                const caseDate = new Date(c.date + 'T12:00:00');
+                return caseDate >= quarterStart && caseDate <= quarterEnd;
+            });
+            const quarterPoints = quarterCases.reduce((sum, c) => sum + c.points, 0);
+
+            // Get month name
+            const monthName = currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            const quarterName = `Q${quarter} ${currentYear}`;
+
             return `
                 <div class="header">
                     <h1>UCP Point Tracker</h1>
@@ -629,6 +652,17 @@
                     <div class="points-total">${todayPoints.toFixed(2)}</div>
                 </div>
                 <div class="container">
+                    <div class="stats-grid" style="margin-bottom: 20px;">
+                        <div class="stat-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                            <div class="stat-value">${monthPoints.toFixed(0)}</div>
+                            <div class="stat-label">${monthName}</div>
+                        </div>
+                        <div class="stat-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);">
+                            <div class="stat-value">${quarterPoints.toFixed(0)}</div>
+                            <div class="stat-label">${quarterName}</div>
+                        </div>
+                    </div>
+
                     <div class="mode-grid">
                         <div class="mode-btn" onclick="logLowCensus()">
                             <div class="mode-btn-title">Low Census Day</div>
@@ -2290,6 +2324,14 @@
                 new Date(b.date) - new Date(a.date) || b.id - a.id
             );
 
+            // Calculate YTD
+            const currentYear = new Date().getFullYear();
+            const ytdCases = allCases.filter(c => {
+                const caseYear = new Date(c.date + 'T12:00:00').getFullYear();
+                return caseYear === currentYear;
+            });
+            const ytdPoints = ytdCases.reduce((sum, c) => sum + c.points, 0);
+
             return `
                 <div class="header">
                     <h1>History</h1>
@@ -2302,6 +2344,13 @@
                         <button class="tab" onclick="currentView='rules'; render();">Rules</button>
                         <button class="tab" onclick="currentView='help'; render();">Help</button>
                     </div>
+                    
+                    <div class="card" style="margin-bottom: 20px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; text-align: center;">
+                        <h3 style="margin: 0 0 8px 0; font-size: 16px; opacity: 0.9;">Year-to-Date ${currentYear}</h3>
+                        <div style="font-size: 36px; font-weight: 700;">${ytdPoints.toFixed(0)} pts</div>
+                        <div style="font-size: 14px; opacity: 0.9; margin-top: 4px;">${ytdCases.length} entries</div>
+                    </div>
+
                     ${allCases.length === 0 ? 
                         '<div style="text-align:center; color:#999; padding:40px;">No cases logged yet</div>' : 
                         sortedCases.map(c => `
