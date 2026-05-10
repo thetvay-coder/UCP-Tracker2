@@ -1990,7 +1990,15 @@
             // C-sections production time
             data.csections.forEach(cs => {
                 if (cs.startTime && cs.endTime) {
-                    const minutes = timeToMinutes(cs.endTime) - timeToMinutes(cs.startTime);
+                    let startMin = timeToMinutes(cs.startTime);
+                    let endMin = timeToMinutes(cs.endTime);
+                    
+                    // Handle overnight case
+                    if (endMin < startMin) {
+                        endMin += 24 * 60;
+                    }
+                    
+                    const minutes = endMin - startMin;
                     breakdown.productionTime += (minutes / 60) * prodRate;
 
                     // Pediatric for C-sections
@@ -2041,7 +2049,15 @@
             // Production from trauma cases
             data.cases.forEach(tc => {
                 if (tc.startTime && tc.endTime) {
-                    const minutes = timeToMinutes(tc.endTime) - timeToMinutes(tc.startTime);
+                    let startMin = timeToMinutes(tc.startTime);
+                    let endMin = timeToMinutes(tc.endTime);
+                    
+                    // Handle overnight case
+                    if (endMin < startMin) {
+                        endMin += 24 * 60;
+                    }
+                    
+                    const minutes = endMin - startMin;
                     breakdown.productionTime += (minutes / 60) * prodRate;
 
                     breakdown.pediatric += calculatePediatricPoints(
@@ -2130,8 +2146,15 @@
             const dayStart = 7 * 60; // 0700 in minutes
             const dayEnd = 15 * 60;  // 1500 in minutes
             
-            const caseStart = timeToMinutes(startTime);
-            const caseEnd = timeToMinutes(endTime);
+            let caseStart = timeToMinutes(startTime);
+            let caseEnd = timeToMinutes(endTime);
+
+            // Handle overnight case
+            if (caseEnd < caseStart) {
+                // Case crosses midnight - no availability gap possible
+                // (overnight cases are outside 0700-1500 window)
+                return 0;
+            }
 
             let gapMinutes = 0;
 
