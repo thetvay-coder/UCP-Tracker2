@@ -580,6 +580,7 @@
         let tempShiftData = null;
         let procedureSelectorTarget = null;
         let procedureSelectorCaseIndex = null;
+        let editingCaseId = null; // Track if we're editing an existing case
 
         // ==================== INITIALIZATION ====================
         document.addEventListener('DOMContentLoaded', () => {
@@ -671,7 +672,12 @@
 
                         <div class="mode-btn" onclick="selectMode('phd-supervise')">
                             <div class="mode-btn-title">Daily Cases</div>
-                            <div class="mode-btn-desc">Log OR cases • Solo or supervising</div>
+                            <div class="mode-btn-desc">Full day 7am-3pm • Solo or supervising</div>
+                        </div>
+                        
+                        <div class="mode-btn" onclick="selectMode('partial-day')">
+                            <div class="mode-btn-title">Partial Day</div>
+                            <div class="mode-btn-desc">Custom availability window • Log cases</div>
                         </div>
                         
                         <div class="mode-btn" onclick="selectMode('pga-br')">
@@ -718,7 +724,14 @@
         function selectMode(mode) {
             currentMode = mode;
             currentView = 'mode';
+            editingCaseId = null; // Starting fresh, not editing
             tempShiftData = initializeModeData(mode);
+            render();
+        }
+
+        function goHome() {
+            currentView = 'home';
+            editingCaseId = null; // Clear editing state when going home
             render();
         }
 
@@ -747,6 +760,8 @@
 
             if (mode === 'phd-supervise') {
                 return { ...base, cases: [] };
+            } else if (mode === 'partial-day') {
+                return { ...base, availStartTime: '07:00', availEndTime: '15:00', isPostOvernight: false, cases: [] };
             } else if (mode === 'pga-br') {
                 return { ...base, startTime: '07:00', endTime: '19:00', cases: [], epidurals: [] };
             } else if (mode === 'pga-ob') {
@@ -760,6 +775,7 @@
         function renderMode() {
             if (currentMode === 'low-census') return renderLowCensus();
             if (currentMode === 'phd-supervise') return renderPHDSupervise();
+            if (currentMode === 'partial-day') return renderPartialDay();
             if (currentMode === 'pga-br') return renderPGABR();
             if (currentMode === 'pga-ob') return renderPGAOB();
             if (currentMode === 'phd-trauma') return renderPHDTrauma();
@@ -768,7 +784,7 @@
         function renderLowCensus() {
             return `
                 <div class="header">
-                    <button class="back-btn" onclick="currentView='home'; render();">← Back</button>
+                    <button class="back-btn" onclick="goHome()">← Back</button>
                     <h1>Low Census Day</h1>
                 </div>
                 <div class="container">
@@ -809,10 +825,163 @@
             alert('Low Census day logged! 16 points');
         }
 
+        function renderPartialDay() {
+            return `
+                <div class="header">
+                    <button class="back-btn" onclick="goHome()">← Back</button>
+                    <h1>Partial Day / Post-Overnight</h1>
+                    <div style="font-size: 13px; opacity: 0.9; margin-top: 4px;">Custom availability or post-call coverage</div>
+                </div>
+                <div class="container">
+                    <div class="card">
+                        <div class="form-group">
+                            <label>Date</label>
+                            <input type="date" value="${tempShiftData.date}" 
+                                   onchange="tempShiftData.date=this.value; render();" />
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" ${tempShiftData.isPostOvernight ? 'checked' : ''} 
+                                       onchange="tempShiftData.isPostOvernight=this.checked; render();">
+                                <span>Post-Overnight (availability only until first case starts)</span>
+                            </label>
+                        </div>
+
+                        ${!tempShiftData.isPostOvernight ? `
+                            <h3 style="margin: 20px 0 12px;">Availability Window</h3>
+                            <div class="alert" style="margin-bottom: 16px;">
+                                Set your availability times for today. Gap time not covered by cases will earn 4 pts/hr.
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Availability Times (24-hour format)</label>
+                                <div class="time-inputs">
+                                    <input type="time" value="${tempShiftData.availStartTime}" 
+                                           onchange="tempShiftData.availStartTime=this.value; render();" />
+                                    <input type="time" value="${tempShiftData.availEndTime}" 
+                                           onchange="tempShiftData.availEndTime=this.value; render();" />
+                                </div>
+                            </div>
+                        ` : `
+                            <div class="alert" style="margin-bottom: 16px;">
+                                <strong>Post-Overnight Mode:</strong> You'll receive 4 pts/hr availability from 07:00 until your first case starts. No availability points after first case.
+                            </div>
+                        `}
+
+                        <h3 style="margin: 20px 0 12px;">Cases</h3>
+                        ${tempShiftData.cases.map((c, i) => renderSupervisedCase(c, i)).join('')}
+                        
+                        <button class="btn btn-secondary" onclick="addSupervisedCase(); render();">
+                            + Add Case
+                        </button>
+
+                        ${tempShiftData.cases.length > 0 ? renderPartialDaySummary() : ''}
+
+                        <button class="btn btn-primary" onclick="savePartialDay()">Done for Day</button>
+                    </div>
+                </div>
+                ${renderProcedureModal()}
+            `;
+        }
+
+        function renderPartialDaySummary() {
+            const validCases = tempShiftData.cases.filter(c => c.startTime && c.endTime);
+            if (validCases.length === 0) return '';
+
+            const compressed = compressTime(validCases.map(c => ({ 
+                start: c.startTime, 
+                end: c.endTime 
+            })));
+            const totalMinutes = compressed.reduce((sum, interval) => 
+                sum + (interval.endMin - interval.startMin), 0);
+            const hours = (totalMinutes / 60).toFixed(2);
+
+            // Calculate live point breakdown
+            const result = calculatePartialDayPoints(tempShiftData);
+
+            return `
+                <div class="summary-box">
+                    <div class="summary-row">
+                        <span>Cases</span>
+                        <span>${validCases.length}</span>
+                    </div>
+                    <div class="summary-row">
+                        <span>Compressed Time</span>
+                        <span>${hours} hours</span>
+                    </div>
+                </div>
+                <div class="breakdown">
+                    ${result.breakdown.availability > 0 ? `
+                        <div class="breakdown-row">
+                            <span>Availability</span>
+                            <span>${result.breakdown.availability.toFixed(2)} pts</span>
+                        </div>
+                    ` : ''}
+                    <div class="breakdown-row">
+                        <span>Case Time</span>
+                        <span>${result.breakdown.caseTime.toFixed(2)} pts</span>
+                    </div>
+                    ${result.breakdown.pediatric > 0 ? `
+                        <div class="breakdown-row">
+                            <span>Pediatric Premium</span>
+                            <span>${result.breakdown.pediatric.toFixed(2)} pts</span>
+                        </div>
+                    ` : ''}
+                    ${result.breakdown.procedures > 0 ? `
+                        <div class="breakdown-row">
+                            <span>Procedures</span>
+                            <span>${result.breakdown.procedures.toFixed(2)} pts</span>
+                        </div>
+                    ` : ''}
+                    <div class="breakdown-row breakdown-total">
+                        <span>Total Points</span>
+                        <span>${result.totalPoints.toFixed(2)}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function savePartialDay() {
+            if (!tempShiftData.isPostOvernight && (!tempShiftData.availStartTime || !tempShiftData.availEndTime)) {
+                alert('Please set availability start and end times');
+                return;
+            }
+
+            const result = calculatePartialDayPoints(tempShiftData);
+            
+            if (editingCaseId) {
+                // Update existing case
+                const index = allCases.findIndex(c => c.id === editingCaseId);
+                if (index !== -1) {
+                    allCases[index] = {
+                        ...tempShiftData,
+                        id: editingCaseId,
+                        points: result.totalPoints,
+                        breakdown: result.breakdown
+                    };
+                }
+                editingCaseId = null;
+            } else {
+                // Add new case
+                allCases.push({
+                    ...tempShiftData,
+                    id: Date.now(),
+                    points: result.totalPoints,
+                    breakdown: result.breakdown
+                });
+            }
+            
+            saveCases();
+            currentView = 'home';
+            render();
+            alert(`Partial day saved! ${result.totalPoints.toFixed(2)} points`);
+        }
+
         function renderSoloCase() {
             return `
                 <div class="header">
-                    <button class="back-btn" onclick="currentView='home'; render();">← Back</button>
+                    <button class="back-btn" onclick="goHome()">← Back</button>
                     <h1>Quick Case</h1>
                 </div>
                 <div class="container">
@@ -881,7 +1050,7 @@
         function renderPHDSupervise() {
             return `
                 <div class="header">
-                    <button class="back-btn" onclick="currentView='home'; render();">← Back</button>
+                    <button class="back-btn" onclick="goHome()">← Back</button>
                     <h1>Daily Cases</h1>
                     <div style="font-size: 13px; opacity: 0.9; margin-top: 4px;">Solo or supervised OR cases</div>
                 </div>
@@ -963,7 +1132,7 @@
             if (!isWeekday) {
                 return `
                     <div class="header">
-                        <button class="back-btn" onclick="currentView='home'; render();">← Back</button>
+                        <button class="back-btn" onclick="goHome()">← Back</button>
                         <h1>PGA Board Runner</h1>
                     </div>
                     <div class="container">
@@ -983,7 +1152,7 @@
 
             return `
                 <div class="header">
-                    <button class="back-btn" onclick="currentView='home'; render();">← Back</button>
+                    <button class="back-btn" onclick="goHome()">← Back</button>
                     <h1>PGA Board Runner</h1>
                     <div style="font-size: 14px; opacity: 0.9; margin-top: 8px;">
                         ${formatDate(tempShiftData.date)} • 7am-7pm
@@ -1084,7 +1253,7 @@
 
             return `
                 <div class="header">
-                    <button class="back-btn" onclick="currentView='home'; render();">← Back</button>
+                    <button class="back-btn" onclick="goHome()">← Back</button>
                     <h1>PGA OB Call</h1>
                 </div>
                 <div class="container">
@@ -1179,7 +1348,7 @@
             if (isWeekend) {
                 return `
                     <div class="header">
-                        <button class="back-btn" onclick="currentView='home'; render();">← Back</button>
+                        <button class="back-btn" onclick="goHome()">← Back</button>
                         <h1>PHD Trauma Call</h1>
                     </div>
                     <div class="container">
@@ -1212,7 +1381,7 @@
 
             return `
                 <div class="header">
-                    <button class="back-btn" onclick="currentView='home'; render();">← Back</button>
+                    <button class="back-btn" onclick="goHome()">← Back</button>
                     <h1>PHD Trauma Call</h1>
                 </div>
                 <div class="container">
@@ -1275,6 +1444,15 @@
                             <option value="infant">Infant +8pts/hr</option>
                             <option value="neonate">Neonate +16pts/hr</option>
                         </select>
+                    </div>
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" 
+                                   ${cs.hadTAPBlock ? 'checked' : ''}
+                                   onchange="tempShiftData.csections[${index}].hadTAPBlock=this.checked; render();"
+                                   style="width: 20px; height: 20px; cursor: pointer;">
+                            <span>TAP Block (bilateral, 3.20 pts)</span>
+                        </label>
                     </div>
                 </div>
             `;
@@ -1668,7 +1846,8 @@
             tempShiftData.csections.push({
                 startTime: '',
                 endTime: '',
-                patientAge: 'adult'
+                patientAge: 'adult',
+                hadTAPBlock: false
             });
         }
 
@@ -1896,6 +2075,182 @@
             };
         }
 
+        function calculatePartialDayPoints(data) {
+            const breakdown = {
+                availability: 0,
+                caseTime: 0,
+                pediatric: 0,
+                procedures: 0
+            };
+
+            const dayType = getDayType(data.date);
+            const validCases = data.cases.filter(c => c.startTime && c.endTime);
+
+            // POST-OVERNIGHT MODE
+            if (data.isPostOvernight) {
+                if (validCases.length === 0) {
+                    return { totalPoints: 0, breakdown: breakdown };
+                }
+
+                // Find earliest case start time
+                let earliestStart = validCases.reduce((min, c) => {
+                    const caseStart = timeToMinutes(c.startTime);
+                    return caseStart < min ? caseStart : min;
+                }, 24 * 60); // Start with max minutes
+
+                // Availability from 07:00 until first case
+                const sevenAM = 7 * 60;
+                if (earliestStart > sevenAM) {
+                    const availMinutes = earliestStart - sevenAM;
+                    breakdown.availability = (availMinutes / 60) * 4; // Always 4 pts/hr weekday rate
+                }
+
+                // Calculate case time (no compression needed for post-overnight, but we'll use it anyway)
+                const compressed = compressTime(validCases.map(c => ({
+                    start: c.startTime,
+                    end: c.endTime
+                })));
+
+                compressed.forEach(interval => {
+                    const startTime = minutesToTime(interval.startMin);
+                    const endTime = minutesToTime(interval.endMin);
+                    breakdown.caseTime += calculateCaseTimePoints(
+                        startTime,
+                        endTime,
+                        false, // Never holiday for post-overnight
+                        dayType.isWeekend
+                    );
+                });
+
+                // Calculate pediatric premium on compressed time
+                compressed.forEach(interval => {
+                    let maxPedRate = 0;
+                    let maxPatientAge = 'adult';
+                    
+                    validCases.forEach(c => {
+                        const caseStart = timeToMinutes(c.startTime);
+                        const caseEnd = timeToMinutes(c.endTime);
+                        
+                        if (caseStart < interval.endMin && caseEnd > interval.startMin) {
+                            const pedRates = { 'adult': 0, 'child': 4, 'infant': 8, 'neonate': 16 };
+                            if (pedRates[c.patientAge] > maxPedRate) {
+                                maxPedRate = pedRates[c.patientAge];
+                                maxPatientAge = c.patientAge;
+                            }
+                        }
+                    });
+                    
+                    if (maxPedRate > 0) {
+                        const startTime = minutesToTime(interval.startMin);
+                        const endTime = minutesToTime(interval.endMin);
+                        breakdown.pediatric += calculatePediatricPoints(startTime, endTime, maxPatientAge);
+                    }
+                });
+
+                // Calculate procedures
+                validCases.forEach(c => {
+                    if (c.procedures) {
+                        breakdown.procedures += c.procedures.reduce((sum, p) => sum + p.points, 0);
+                    }
+                });
+
+                const totalPoints = breakdown.availability + breakdown.caseTime + 
+                                  breakdown.pediatric + breakdown.procedures;
+
+                return {
+                    totalPoints: Math.round(totalPoints * 100) / 100,
+                    breakdown: breakdown
+                };
+            }
+
+            // NORMAL PARTIAL DAY MODE (original logic)
+            if (!data.availStartTime || !data.availEndTime) {
+                return { totalPoints: 0, breakdown: breakdown };
+            }
+
+            // Calculate total availability window
+            let availStart = timeToMinutes(data.availStartTime);
+            let availEnd = timeToMinutes(data.availEndTime);
+            if (availEnd < availStart) availEnd += 24 * 60; // Handle overnight
+            const totalAvailMinutes = availEnd - availStart;
+
+            if (validCases.length === 0) {
+                // No cases, all availability time counts
+                breakdown.availability = (totalAvailMinutes / 60) * 4; // Always 4 pts/hr for partial day
+                return {
+                    totalPoints: Math.round(breakdown.availability * 100) / 100,
+                    breakdown: breakdown
+                };
+            }
+
+            // Compress overlapping times
+            const compressed = compressTime(validCases.map(c => ({
+                start: c.startTime,
+                end: c.endTime
+            })));
+
+            // Calculate case time on compressed intervals
+            compressed.forEach(interval => {
+                const startTime = minutesToTime(interval.startMin);
+                const endTime = minutesToTime(interval.endMin);
+                breakdown.caseTime += calculateCaseTimePoints(
+                    startTime,
+                    endTime,
+                    false, // No holiday in partial day
+                    dayType.isWeekend
+                );
+            });
+
+            // Calculate pediatric premium on compressed time
+            compressed.forEach(interval => {
+                let maxPedRate = 0;
+                let maxPatientAge = 'adult';
+                
+                validCases.forEach(c => {
+                    const caseStart = timeToMinutes(c.startTime);
+                    const caseEnd = timeToMinutes(c.endTime);
+                    
+                    if (caseStart < interval.endMin && caseEnd > interval.startMin) {
+                        const pedRates = { 'adult': 0, 'child': 4, 'infant': 8, 'neonate': 16 };
+                        if (pedRates[c.patientAge] > maxPedRate) {
+                            maxPedRate = pedRates[c.patientAge];
+                            maxPatientAge = c.patientAge;
+                        }
+                    }
+                });
+                
+                if (maxPedRate > 0) {
+                    const startTime = minutesToTime(interval.startMin);
+                    const endTime = minutesToTime(interval.endMin);
+                    breakdown.pediatric += calculatePediatricPoints(startTime, endTime, maxPatientAge);
+                }
+            });
+
+            // Calculate procedures
+            validCases.forEach(c => {
+                if (c.procedures) {
+                    breakdown.procedures += c.procedures.reduce((sum, p) => sum + p.points, 0);
+                }
+            });
+
+            // Calculate availability gaps (custom window, not fixed 7am-3pm)
+            const totalCaseMinutes = compressed.reduce((sum, i) => 
+                sum + (i.endMin - i.startMin), 0);
+            const gapMinutes = totalAvailMinutes - totalCaseMinutes;
+            
+            if (gapMinutes > 0) {
+                breakdown.availability = (gapMinutes / 60) * 4; // Always 4 pts/hr for partial day
+            }
+
+            const totalPoints = breakdown.availability + breakdown.caseTime + 
+                              breakdown.pediatric + breakdown.procedures;
+
+            return {
+                totalPoints: Math.round(totalPoints * 100) / 100,
+                breakdown: breakdown
+            };
+        }
+
         function calculatePGABRPoints(data) {
             const breakdown = {
                 inhouseAvailability: 0,
@@ -2041,6 +2396,12 @@
                         cs.endTime,
                         cs.patientAge
                     );
+                    
+                    // TAP block if performed
+                    if (cs.hadTAPBlock) {
+                        if (!breakdown.procedures) breakdown.procedures = 0;
+                        breakdown.procedures += 3.20; // TAP block bilateral
+                    }
                 }
             });
 
@@ -2245,12 +2606,27 @@
         function savePHDSupervise() {
             const result = calculatePHDSupervisePoints(tempShiftData);
             
-            allCases.push({
-                ...tempShiftData,
-                id: Date.now(),
-                points: result.totalPoints,
-                breakdown: result.breakdown
-            });
+            if (editingCaseId) {
+                // Update existing case
+                const index = allCases.findIndex(c => c.id === editingCaseId);
+                if (index !== -1) {
+                    allCases[index] = {
+                        ...tempShiftData,
+                        id: editingCaseId,
+                        points: result.totalPoints,
+                        breakdown: result.breakdown
+                    };
+                }
+                editingCaseId = null;
+            } else {
+                // Add new case
+                allCases.push({
+                    ...tempShiftData,
+                    id: Date.now(),
+                    points: result.totalPoints,
+                    breakdown: result.breakdown
+                });
+            }
             
             saveCases();
             currentView = 'home';
@@ -2261,12 +2637,27 @@
         function savePGABR() {
             const result = calculatePGABRPoints(tempShiftData);
             
-            allCases.push({
-                ...tempShiftData,
-                id: Date.now(),
-                points: result.totalPoints,
-                breakdown: result.breakdown
-            });
+            if (editingCaseId) {
+                // Update existing case
+                const index = allCases.findIndex(c => c.id === editingCaseId);
+                if (index !== -1) {
+                    allCases[index] = {
+                        ...tempShiftData,
+                        id: editingCaseId,
+                        points: result.totalPoints,
+                        breakdown: result.breakdown
+                    };
+                }
+                editingCaseId = null;
+            } else {
+                // Add new case
+                allCases.push({
+                    ...tempShiftData,
+                    id: Date.now(),
+                    points: result.totalPoints,
+                    breakdown: result.breakdown
+                });
+            }
             
             saveCases();
             currentView = 'home';
@@ -2277,12 +2668,27 @@
         function savePGAOB() {
             const result = calculatePGAOBPoints(tempShiftData);
             
-            allCases.push({
-                ...tempShiftData,
-                id: Date.now(),
-                points: result.totalPoints,
-                breakdown: result.breakdown
-            });
+            if (editingCaseId) {
+                // Update existing case
+                const index = allCases.findIndex(c => c.id === editingCaseId);
+                if (index !== -1) {
+                    allCases[index] = {
+                        ...tempShiftData,
+                        id: editingCaseId,
+                        points: result.totalPoints,
+                        breakdown: result.breakdown
+                    };
+                }
+                editingCaseId = null;
+            } else {
+                // Add new case
+                allCases.push({
+                    ...tempShiftData,
+                    id: Date.now(),
+                    points: result.totalPoints,
+                    breakdown: result.breakdown
+                });
+            }
             
             saveCases();
             currentView = 'home';
@@ -2293,12 +2699,27 @@
         function savePHDTrauma() {
             const result = calculatePHDTraumaPoints(tempShiftData);
             
-            allCases.push({
-                ...tempShiftData,
-                id: Date.now(),
-                points: result.totalPoints,
-                breakdown: result.breakdown
-            });
+            if (editingCaseId) {
+                // Update existing case
+                const index = allCases.findIndex(c => c.id === editingCaseId);
+                if (index !== -1) {
+                    allCases[index] = {
+                        ...tempShiftData,
+                        id: editingCaseId,
+                        points: result.totalPoints,
+                        breakdown: result.breakdown
+                    };
+                }
+                editingCaseId = null;
+            } else {
+                // Add new case
+                allCases.push({
+                    ...tempShiftData,
+                    id: Date.now(),
+                    points: result.totalPoints,
+                    breakdown: result.breakdown
+                });
+            }
             
             saveCases();
             currentView = 'home';
@@ -2324,13 +2745,61 @@
                 new Date(b.date) - new Date(a.date) || b.id - a.id
             );
 
-            // Calculate YTD
-            const currentYear = new Date().getFullYear();
-            const ytdCases = allCases.filter(c => {
-                const caseYear = new Date(c.date + 'T12:00:00').getFullYear();
-                return caseYear === currentYear;
+            if (allCases.length === 0) {
+                return `
+                    <div class="header">
+                        <h1>History</h1>
+                    </div>
+                    <div class="container">
+                        <div class="tabs">
+                            <button class="tab" onclick="goHome()">Home</button>
+                            <button class="tab active">History</button>
+                            <button class="tab" onclick="currentView='stats'; render();">Stats</button>
+                            <button class="tab" onclick="currentView='rules'; render();">Rules</button>
+                            <button class="tab" onclick="currentView='help'; render();">Help</button>
+                        </div>
+                        <div style="text-align:center; color:#999; padding:40px;">No cases logged yet</div>
+                    </div>
+                `;
+            }
+
+            // Group by quarter and month
+            const currentDate = new Date();
+            const currentYear = currentDate.getFullYear();
+            const currentMonth = currentDate.getMonth();
+            const currentQuarter = Math.floor(currentMonth / 3) + 1;
+
+            // Calculate quarterly summaries
+            const quarters = {};
+            allCases.forEach(c => {
+                const caseDate = new Date(c.date + 'T12:00:00');
+                const year = caseDate.getFullYear();
+                const month = caseDate.getMonth();
+                const quarter = Math.floor(month / 3) + 1;
+                const key = `${year}-Q${quarter}`;
+                
+                if (!quarters[key]) {
+                    quarters[key] = { year, quarter, points: 0, entries: 0 };
+                }
+                quarters[key].points += c.points;
+                quarters[key].entries += 1;
             });
-            const ytdPoints = ytdCases.reduce((sum, c) => sum + c.points, 0);
+
+            // Group by month
+            const months = {};
+            sortedCases.forEach(c => {
+                const monthKey = c.date.substring(0, 7); // YYYY-MM
+                if (!months[monthKey]) {
+                    months[monthKey] = [];
+                }
+                months[monthKey].push(c);
+            });
+
+            // Calculate monthly totals
+            const monthlyTotals = {};
+            Object.keys(months).forEach(key => {
+                monthlyTotals[key] = months[key].reduce((sum, c) => sum + c.points, 0);
+            });
 
             return `
                 <div class="header">
@@ -2338,51 +2807,79 @@
                 </div>
                 <div class="container">
                     <div class="tabs">
-                        <button class="tab" onclick="currentView='home'; render();">Home</button>
+                        <button class="tab" onclick="goHome()">Home</button>
                         <button class="tab active">History</button>
                         <button class="tab" onclick="currentView='stats'; render();">Stats</button>
                         <button class="tab" onclick="currentView='rules'; render();">Rules</button>
                         <button class="tab" onclick="currentView='help'; render();">Help</button>
                     </div>
                     
-                    <div class="card" style="margin-bottom: 20px; background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; text-align: center;">
-                        <h3 style="margin: 0 0 8px 0; font-size: 16px; opacity: 0.9;">Year-to-Date ${currentYear}</h3>
-                        <div style="font-size: 36px; font-weight: 700;">${ytdPoints.toFixed(0)} pts</div>
-                        <div style="font-size: 14px; opacity: 0.9; margin-top: 4px;">${ytdCases.length} entries</div>
+                    <!-- Quarterly Summary -->
+                    <div class="stats-grid" style="margin-bottom: 20px;">
+                        ${Object.keys(quarters).sort().reverse().slice(0, 4).map(key => {
+                            const q = quarters[key];
+                            const isCurrent = q.year === currentYear && q.quarter === currentQuarter;
+                            return `
+                                <div class="stat-card" style="background: linear-gradient(135deg, ${isCurrent ? '#667eea 0%, #764ba2' : '#a8edea 0%, #fed6e3'} 100%);">
+                                    <div class="stat-value">${q.points.toFixed(0)}</div>
+                                    <div class="stat-label">Q${q.quarter} ${q.year}</div>
+                                    <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">${q.entries} entries</div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
 
-                    ${allCases.length === 0 ? 
-                        '<div style="text-align:center; color:#999; padding:40px;">No cases logged yet</div>' : 
-                        sortedCases.map(c => `
-                            <div class="history-item">
-                                <div class="history-header">
-                                    <div class="history-date">
-                                        ${formatDate(c.date)}
-                                        <span class="badge">${getModeLabel(c.mode)}</span>
-                                        ${c.isHoliday ? '<span class="badge badge-holiday">HOLIDAY</span>' : ''}
-                                        ${c.lowCensus ? '<span class="badge badge-lowcensus">LOW CENSUS</span>' : ''}
+                    <!-- Monthly Grouped Entries -->
+                    ${Object.keys(months).sort().reverse().map(monthKey => {
+                        const cases = months[monthKey];
+                        const date = new Date(monthKey + '-15T12:00:00');
+                        const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                        const total = monthlyTotals[monthKey];
+                        
+                        return `
+                            <div class="card" style="margin-bottom: 16px; padding: 0; overflow: hidden;">
+                                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 16px; display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <h3 style="margin: 0; font-size: 18px;">${monthName}</h3>
+                                        <div style="font-size: 13px; opacity: 0.9; margin-top: 4px;">${cases.length} entries</div>
                                     </div>
-                                    <div class="history-points">${c.points.toFixed(2)} pts</div>
+                                    <div style="font-size: 32px; font-weight: 700;">${total.toFixed(0)}</div>
                                 </div>
-                                <div class="history-details">
-                                    ${renderCaseDetails(c)}
-                                </div>
-                                ${renderBreakdown(c.breakdown)}
-                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px;">
-                                    ${canReopenCase(c) ? `
-                                        <button class="btn btn-secondary" onclick="reopenCase(${c.id})" 
-                                                style="padding: 12px;">
-                                            Add More Cases
-                                        </button>
-                                    ` : '<div></div>'}
-                                    <button class="btn btn-danger" onclick="deleteCase(${c.id})" 
-                                            style="padding: 12px;">
-                                        Delete
-                                    </button>
+                                <div style="padding: 16px;">
+                                    ${cases.map(c => `
+                                        <div class="history-item" style="margin-bottom: 12px; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px;">
+                                            <div class="history-header">
+                                                <div class="history-date">
+                                                    ${formatDate(c.date)}
+                                                    <span class="badge">${getModeLabel(c.mode)}</span>
+                                                    ${c.isHoliday ? '<span class="badge badge-holiday">HOLIDAY</span>' : ''}
+                                                    ${c.lowCensus ? '<span class="badge badge-lowcensus">LOW CENSUS</span>' : ''}
+                                                    ${c.isPostOvernight ? '<span class="badge" style="background: #9333ea;">POST-OVERNIGHT</span>' : ''}
+                                                </div>
+                                                <div class="history-points">${c.points.toFixed(2)} pts</div>
+                                            </div>
+                                            <div class="history-details">
+                                                ${renderCaseDetails(c)}
+                                            </div>
+                                            ${renderBreakdown(c.breakdown)}
+                                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px;">
+                                                ${canReopenCase(c) ? `
+                                                    <button class="btn btn-secondary" onclick="reopenCase(${c.id})" 
+                                                            style="padding: 12px;">
+                                                        Add More Cases
+                                                    </button>
+                                                ` : '<div></div>'}
+                                                <button class="btn btn-danger" onclick="deleteCase(${c.id})" 
+                                                        style="padding: 12px;">
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    `).join('')}
                                 </div>
                             </div>
-                        `).join('')
-                    }
+                        `;
+                    }).join('')}
                 </div>
             `;
         }
@@ -2396,9 +2893,9 @@
             const caseData = allCases.find(c => c.id === id);
             if (!caseData) return;
             
-            // Remove the existing entry
-            allCases = allCases.filter(c => c.id !== id);
-            saveCases();
+            // DON'T remove the existing entry yet - keep it until user saves
+            // Store the ID so we know we're editing an existing case
+            editingCaseId = id;
             
             // Set up mode with existing data
             currentMode = caseData.mode;
@@ -2494,7 +2991,7 @@
                 </div>
                 <div class="container">
                     <div class="tabs">
-                        <button class="tab" onclick="currentView='home'; render();">Home</button>
+                        <button class="tab" onclick="goHome()">Home</button>
                         <button class="tab" onclick="currentView='history'; render();">History</button>
                         <button class="tab active">Stats</button>
                         <button class="tab" onclick="currentView='rules'; render();">Rules</button>
@@ -2513,9 +3010,14 @@
                     </div>
 
                     <div class="card">
-                        <h3 style="margin-bottom: 16px;">Export Data</h3>
-                        <button class="btn btn-secondary" onclick="window.doExport()">
-                            Download CSV
+                        <h3 style="margin-bottom: 16px;">Backup & Sync</h3>
+                        <p style="font-size: 14px; color: #666; margin-bottom: 16px;">Export to backup your data. Import to sync from another device.</p>
+                        <button class="btn btn-secondary" onclick="window.doExport()" style="margin-bottom: 12px;">
+                            📥 Download CSV
+                        </button>
+                        <input type="file" id="csvImportInput" accept=".csv" style="display: none;" onchange="importCSV(event)">
+                        <button class="btn btn-primary" onclick="document.getElementById('csvImportInput').click()">
+                            📤 Import CSV
                         </button>
                     </div>
                 </div>
@@ -2531,7 +3033,7 @@
                 </div>
                 <div class="container">
                     <div class="tabs">
-                        <button class="tab" onclick="currentView='home'; render();">Home</button>
+                        <button class="tab" onclick="goHome()">Home</button>
                         <button class="tab" onclick="currentView='history'; render();">History</button>
                         <button class="tab" onclick="currentView='stats'; render();">Stats</button>
                         <button class="tab active">Rules</button>
@@ -2618,7 +3120,7 @@
                 </div>
                 <div class="container">
                     <div class="tabs">
-                        <button class="tab" onclick="currentView='home'; render();">Home</button>
+                        <button class="tab" onclick="goHome()">Home</button>
                         <button class="tab" onclick="currentView='history'; render();">History</button>
                         <button class="tab" onclick="currentView='stats'; render();">Stats</button>
                         <button class="tab" onclick="currentView='rules'; render();">Rules</button>
@@ -2685,21 +3187,16 @@
             }
 
             try {
-                // CSV Headers
-                const headers = ['Date', 'Day', 'Mode', 'Holiday', 'Low Census', 'Points'];
+                // Export full JSON data as CSV for complete reimport capability
+                const headers = ['Date', 'Mode', 'Points', 'FullData'];
                 
-                // Generate rows
+                // Generate rows with full data encoded
                 const rows = allCases.map(c => {
-                    const date = new Date(c.date + 'T12:00:00');
-                    const day = date.toLocaleDateString('en-US', { weekday: 'short' });
-                    
                     return [
                         c.date,
-                        day,
-                        getModeLabel(c.mode),
-                        c.isHoliday ? 'Yes' : 'No',
-                        c.lowCensus ? 'Yes' : 'No',
-                        c.points.toFixed(2)
+                        c.mode,
+                        c.points.toFixed(2),
+                        '"' + JSON.stringify(c).replace(/"/g, '""') + '"'
                     ].join(',');
                 });
 
@@ -2724,9 +3221,80 @@
             }
         }
 
+        function importCSV(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const content = e.target.result;
+                    const lines = content.split('\n');
+                    
+                    // Skip header
+                    const dataLines = lines.slice(1).filter(line => line.trim());
+                    
+                    const importedCases = [];
+                    let parseErrors = 0;
+                    
+                    dataLines.forEach(line => {
+                        try {
+                            // Parse CSV line (handle quoted JSON)
+                            const match = line.match(/^([^,]+),([^,]+),([^,]+),"(.+)"$/);
+                            if (match) {
+                                const jsonStr = match[4].replace(/""/g, '"');
+                                const caseData = JSON.parse(jsonStr);
+                                importedCases.push(caseData);
+                            }
+                        } catch (err) {
+                            parseErrors++;
+                        }
+                    });
+
+                    if (importedCases.length === 0) {
+                        alert('No valid data found in CSV file');
+                        return;
+                    }
+
+                    // Smart merge: detect duplicates
+                    const existingIds = new Set(allCases.map(c => c.id));
+                    const newCases = importedCases.filter(c => !existingIds.has(c.id));
+                    const duplicates = importedCases.length - newCases.length;
+
+                    if (newCases.length === 0) {
+                        alert('All ' + importedCases.length + ' cases already exist. Nothing to import.');
+                        return;
+                    }
+
+                    // Confirm import
+                    const msg = 'Found ' + importedCases.length + ' cases in file:\n\n' +
+                                '✅ ' + newCases.length + ' new cases to import\n' +
+                                '⚠️ ' + duplicates + ' duplicates (will be skipped)\n' +
+                                (parseErrors > 0 ? '❌ ' + parseErrors + ' errors (will be skipped)\n' : '') +
+                                '\nImport new cases?';
+                    
+                    if (confirm(msg)) {
+                        allCases.push(...newCases);
+                        saveCases();
+                        render();
+                        alert('✅ Successfully imported ' + newCases.length + ' cases!');
+                    }
+
+                } catch (error) {
+                    alert('Import error: ' + error.message);
+                }
+                
+                // Clear file input
+                event.target.value = '';
+            };
+            
+            reader.readAsText(file);
+        }
+
         function getModeLabel(mode) {
             const labels = {
                 'phd-supervise': 'Daily Cases',
+                'partial-day': 'Partial Day',
                 'pga-br': 'PGA BR',
                 'pga-ob': 'PGA OB',
                 'phd-trauma': 'PHD Trauma',
