@@ -549,29 +549,115 @@
     <script>
         // ==================== PROCEDURE DATABASE ====================
         const PROCEDURES = [
-            // Documentation
-            { code: "99222", desc: "H&P (HISTORY & PHYSICAL)", points: 5.20 },
-            
-            // Vascular Access
-            { code: "36620", desc: "INSERTION CATHETER, ARTERY", points: 2.00 },
-            { code: "36556", desc: "INSERT NON-TUNNEL CV CATH; 5 OR OLDER", points: 3.50 },
-            
             // Nerve Blocks
-            { code: "64447", desc: "N BLOCK INJ FEM SINGLE", points: 2.68 },
-            { code: "64415", desc: "N BLOCK INJ BRACHIAL PLEXUS", points: 3.00 },
-            { code: "64450", desc: "N BLOCK OTHER PERIPHERAL", points: 1.50 },
-            { code: "64445", desc: "N BLOCK INJ SCIATIC SNG", points: 2.78 },
-            { code: "64417", desc: "NERVE BLOCK INJ, AXILLARY", points: 2.62 },
-            
-            // TAP Block
-            { code: "64488", desc: "TAP BLOCK, BILATERAL", points: 3.20 },
-            
-            // Epidural
-            { code: "62273", desc: "INJECT EPIDURAL PATCH", points: 4.30 },
-            
-            // Airway
-            { code: "31500", desc: "INSERT EMERGENCY AIRWAY", points: 6.00 }
+            { code: "64447", desc: "N BLOCK INJ FEM SINGLE", points: 2.68, cat: "Nerve Blocks" },
+            { code: "64415", desc: "N BLOCK INJ BRACHIAL PLEXUS", points: 3.00, cat: "Nerve Blocks" },
+            { code: "64416", desc: "Brachial plexus block, continuous", points: 3.60, cat: "Nerve Blocks" },
+            { code: "64417", desc: "NERVE BLOCK INJ, AXILLARY", points: 2.62, cat: "Nerve Blocks" },
+            { code: "64445", desc: "N BLOCK INJ SCIATIC SNG", points: 2.78, cat: "Nerve Blocks" },
+            { code: "64446", desc: "Sciatic block, continuous", points: 3.50, cat: "Nerve Blocks" },
+            { code: "64450", desc: "N BLOCK OTHER PERIPHERAL", points: 1.50, cat: "Nerve Blocks" },
+            { code: "64420", desc: "Intercostal block, single", points: 2.16, cat: "Nerve Blocks" },
+            { code: "64488", desc: "TAP BLOCK, BILATERAL", points: 3.20, cat: "Nerve Blocks" },
+            { code: "64486", desc: "TAP block, unilateral", points: 2.54, cat: "Nerve Blocks" },
+            { code: "64461", desc: "Paravertebral block, single", points: 3.50, cat: "Nerve Blocks" },
+            { code: "64462", desc: "Paravertebral block, additional injection", points: 2.20, cat: "Nerve Blocks" },
+            // Neuraxial
+            { code: "62273", desc: "INJECT EPIDURAL PATCH", points: 4.30, cat: "Neuraxial" },
+            { code: "62322", desc: "Epidural injection, lumbar/sacral", points: 3.10, cat: "Neuraxial" },
+            { code: "62326", desc: "Epidural continuous, lumbar/sacral", points: 3.56, cat: "Neuraxial" },
+            // Lines & Ultrasound
+            { code: "36620", desc: "INSERTION CATHETER, ARTERY", points: 2.00, cat: "Lines & Ultrasound" },
+            { code: "36556", desc: "INSERT NON-TUNNEL CV CATH; 5 OR OLDER", points: 3.50, cat: "Lines & Ultrasound" },
+            { code: "36010", desc: "Venous catheter placement", points: 4.36, cat: "Lines & Ultrasound" },
+            { code: "76937", desc: "US guidance, vascular access", points: 0.60, cat: "Lines & Ultrasound" },
+            // Airway & Resuscitation
+            { code: "31500", desc: "INSERT EMERGENCY AIRWAY", points: 6.00, cat: "Airway & Resuscitation" },
+            // Visits & Consults
+            { code: "99222", desc: "H&P (HISTORY & PHYSICAL)", points: 5.20, cat: "Visits & Consults" },
+            { code: "99231", desc: "Subsequent hospital care", points: 2.00, cat: "Visits & Consults" },
+            { code: "99253", desc: "Inpatient consult", points: 4.00, cat: "Visits & Consults" },
+            { code: "99212", desc: "Outpatient visit, established", points: 1.40, cat: "Visits & Consults" },
         ];
+
+        // ==================== FLAT FEE MENU ====================
+        // Swap this list to change what the Flat Fee picker offers.
+        // Each item: { code, desc, points }  (points = 2 x work RVU)
+        let FLAT_FEE_MENU = PROCEDURES.slice();
+
+        function calculateFlatFeePoints(data) {
+            const items = Array.isArray(data.items) ? data.items : [];
+            const total = items.reduce((s, it) => s + (Number(it.points) || 0) * Math.max(0, Number(it.qty) || 0), 0);
+            const r = Math.round(total * 100) / 100;
+            return { totalPoints: r, breakdown: { procedures: r } };
+        }
+
+        function flatFeeSetQty(code, qty) {
+            qty = Math.max(0, parseInt(qty, 10) || 0);
+            const items = tempShiftData.items;
+            const i = items.findIndex(it => it.code === code);
+            if (qty === 0) { if (i !== -1) items.splice(i, 1); }
+            else if (i !== -1) items[i].qty = qty;
+            else {
+                const m = FLAT_FEE_MENU.find(x => x.code === code);
+                if (m) items.push({ code: m.code, desc: m.desc, points: m.points, qty });
+            }
+            render();
+        }
+
+        function renderFlatFee() {
+            const d = tempShiftData;
+            const res = calculateFlatFeePoints(d);
+            const extra = d.items.filter(it => !FLAT_FEE_MENU.some(m => m.code === it.code));
+            let lastCat = null;
+            const rows = FLAT_FEE_MENU.concat(extra).map(m => {
+                const head = (m.cat && m.cat !== lastCat) ? `<div style="font-weight:600;margin:12px 0 4px;color:#333">${m.cat}</div>` : '';
+                lastCat = m.cat || lastCat;
+                const it = d.items.find(x => x.code === m.code);
+                const q = it ? it.qty : 0;
+                return head + `<div class="procedure-item" style="display:flex;align-items:center;gap:8px;">
+                    <div style="flex:1"><span class="procedure-code">${m.code}</span> <span class="procedure-points">${m.points} pts</span>
+                    <div style="font-size:12px;color:#666;margin-top:4px;">${m.desc}</div></div>
+                    <button class="btn" style="width:auto;padding:6px 12px;margin:0" onclick="flatFeeSetQty('${m.code}', ${q - 1})">−</button>
+                    <span class="ff-qty" data-code="${m.code}" style="min-width:20px;text-align:center">${q}</span>
+                    <button class="btn" style="width:auto;padding:6px 12px;margin:0" onclick="flatFeeSetQty('${m.code}', ${q + 1})">+</button>
+                </div>`;
+            }).join('');
+            return `
+                <div class="header">
+                    <button class="back-btn" onclick="goHome()">← Back</button>
+                    <h1>Flat Fee Procedure</h1>
+                    <div class="points-total">${res.totalPoints.toFixed(2)}</div>
+                </div>
+                <div class="container">
+                    <div class="card">
+                        <div class="alert">Standalone procedures with no case time (e.g. a block or intubation). Points = sum of flats (2 × work RVU).</div>
+                        <div class="form-group">
+                            <label>Date</label>
+                            <input type="date" value="${d.date}" onchange="tempShiftData.date=this.value; render();" />
+                        </div>
+                        <div class="form-group"><label>Procedures (tap + / −)</label>${rows}</div>
+                        <button class="btn btn-primary" onclick="saveFlatFee()">${editingCaseId ? 'Update Entry' : 'Save Flat Fee'}</button>
+                    </div>
+                </div>`;
+        }
+
+        function saveFlatFee() {
+            if (!tempShiftData.items || !tempShiftData.items.length) { alert('Pick at least one procedure'); return; }
+            const result = calculateFlatFeePoints(tempShiftData);
+            const entry = { ...tempShiftData, points: result.totalPoints, breakdown: result.breakdown };
+            if (editingCaseId) {
+                const index = allCases.findIndex(c => c.id === editingCaseId);
+                if (index !== -1) allCases[index] = { ...entry, id: editingCaseId };
+                editingCaseId = null;
+                saveCases(); currentView = 'history'; render();
+                alert(`Entry updated! ${result.totalPoints.toFixed(2)} points`);
+                return;
+            }
+            allCases.push({ ...entry, id: Date.now() });
+            saveCases(); currentView = 'home'; render();
+            alert(`Flat fee saved! ${result.totalPoints.toFixed(2)} points`);
+        }
 
         // ==================== STATE MANAGEMENT ====================
         let currentView = 'home';
@@ -690,6 +776,11 @@
                             <div class="mode-btn-desc">In-house shifts • Your epidurals + C-sections</div>
                         </div>
                         
+                        <div class="mode-btn" onclick="selectMode('flat-fee')">
+                            <div class="mode-btn-title">Flat Fee</div>
+                            <div class="mode-btn-desc">Standalone procedure • Block, intubation, line</div>
+                        </div>
+
                         <div class="mode-btn" onclick="selectMode('phd-trauma')">
                             <div class="mode-btn-title">PHD Trauma Call</div>
                             <div class="mode-btn-desc">In-house shifts • Your trauma cases</div>
@@ -758,7 +849,9 @@
                 lowCensus: false
             };
 
-            if (mode === 'phd-supervise') {
+            if (mode === 'solo') {
+                return { ...base, startTime: '', endTime: '', patientAge: 'adult', procedures: [] };
+            } else if (mode === 'phd-supervise') {
                 return { ...base, cases: [] };
             } else if (mode === 'partial-day') {
                 return { ...base, availStartTime: '07:00', availEndTime: '15:00', isPostOvernight: false, cases: [] };
@@ -768,17 +861,21 @@
                 return { ...base, shiftType: null, startTime: '', endTime: '', epidurals: [], csections: [] };
             } else if (mode === 'phd-trauma') {
                 return { ...base, shiftType: null, startTime: '', endTime: '', cases: [] };
+            } else if (mode === 'flat-fee') {
+                return { ...base, items: [] };
             }
         }
 
         // ==================== MODE RENDERING ====================
         function renderMode() {
             if (currentMode === 'low-census') return renderLowCensus();
+            if (currentMode === 'solo') return renderSoloCase();
             if (currentMode === 'phd-supervise') return renderPHDSupervise();
             if (currentMode === 'partial-day') return renderPartialDay();
             if (currentMode === 'pga-br') return renderPGABR();
             if (currentMode === 'pga-ob') return renderPGAOB();
             if (currentMode === 'phd-trauma') return renderPHDTrauma();
+            if (currentMode === 'flat-fee') return renderFlatFee();
         }
 
         function renderLowCensus() {
@@ -844,7 +941,7 @@
                             <label class="checkbox-label">
                                 <input type="checkbox" ${tempShiftData.isPostOvernight ? 'checked' : ''} 
                                        onchange="tempShiftData.isPostOvernight=this.checked; render();">
-                                <span>Post-Overnight (availability only until first case starts)</span>
+                                <span>Post-Overnight (availability 07:00 until last case ends, max 15:00)</span>
                             </label>
                         </div>
 
@@ -865,7 +962,7 @@
                             </div>
                         ` : `
                             <div class="alert" style="margin-bottom: 16px;">
-                                <strong>Post-Overnight Mode:</strong> You'll receive 4 pts/hr availability from 07:00 until your first case starts. No availability points after first case.
+                                <strong>Post-Overnight Mode:</strong> You'll receive 4 pts/hr availability for gap time between 07:00 and the end of your last case (capped at 15:00). No availability after your last case ends.
                             </div>
                         `}
 
@@ -1271,7 +1368,7 @@
                                 <div class="shift-option" 
                                      onclick="selectOBShift('weeknight', '19:00', '07:00', false)">
                                     <div class="shift-option-title">Weeknight Shift</div>
-                                    <div class="shift-option-time">7pm-7am (7 pts/hr avail, 4 pts/hr prod)</div>
+                                    <div class="shift-option-time">7pm-7am (7.7 pts/hr avail, 4 pts/hr prod)</div>
                                 </div>
                             ` : ''}
 
@@ -1279,20 +1376,20 @@
                                 <div class="shift-option" 
                                      onclick="selectOBShift('weekend-day', '07:00', '19:00', false)">
                                     <div class="shift-option-title">Weekend Day Shift</div>
-                                    <div class="shift-option-time">7am-7pm (8 pts/hr avail, 5 pts/hr prod)</div>
+                                    <div class="shift-option-time">7am-7pm (8.8 pts/hr avail, 5 pts/hr prod)</div>
                                 </div>
 
                                 <div class="shift-option" 
                                      onclick="selectOBShift('weekend-night', '19:00', '07:00', false)">
                                     <div class="shift-option-title">Weekend Night Shift</div>
-                                    <div class="shift-option-time">7pm-7am (8 pts/hr avail, 5 pts/hr prod)</div>
+                                    <div class="shift-option-time">7pm-7am (8.8 pts/hr avail, 5 pts/hr prod)</div>
                                 </div>
                             ` : ''}
 
                             <div class="shift-option" 
                                  onclick="selectOBShift('holiday24', '00:00', '23:59', true)">
                                 <div class="shift-option-title">24-Hour Holiday Shift</div>
-                                <div class="shift-option-time">12am-11:59pm (9 pts/hr avail, 6 pts/hr prod)</div>
+                                <div class="shift-option-time">12am-11:59pm (9.9 pts/hr avail, 6 pts/hr prod)</div>
                             </div>
                         </div>
                     </div>
@@ -1754,13 +1851,14 @@
                 p.desc.toLowerCase().includes(searchTerm)
             );
 
-            const listHtml = filtered.slice(0, 20).map(p => `
+            let lastCat = null;
+            const listHtml = filtered.map(p => { const head = (p.cat !== lastCat) ? `<div style="font-weight:600;margin:12px 0 4px;color:#333">${p.cat}</div>` : ''; lastCat = p.cat; return head + `
                 <div class="procedure-item" onclick="toggleProcedure('${p.code}')">
                     <span class="procedure-code">${p.code}</span>
                     <span class="procedure-points">${p.points} pts</span>
                     <div style="font-size: 12px; color: #666; margin-top: 4px;">${p.desc}</div>
                 </div>
-            `).join('');
+            `; }).join('');
 
             document.getElementById('procList').innerHTML = listHtml;
             updateSelectedProcedures();
@@ -1784,7 +1882,7 @@
             if (existingIndex !== -1) {
                 procedures.splice(existingIndex, 1);
             } else {
-                procedures.push(proc);
+                procedures.push({ code: proc.code, desc: proc.desc, points: proc.points });
             }
 
             updateSelectedProcedures();
@@ -2098,11 +2196,28 @@
                     return caseStart < min ? caseStart : min;
                 }, 24 * 60); // Start with max minutes
 
-                // Availability from 07:00 until first case
+                // Availability: gap time from 07:00 until the end of the last case or 15:00, whichever is earlier
                 const sevenAM = 7 * 60;
-                if (earliestStart > sevenAM) {
-                    const availMinutes = earliestStart - sevenAM;
-                    breakdown.availability = (availMinutes / 60) * 4; // Always 4 pts/hr weekday rate
+                const latestEnd = validCases.reduce((max, c) => {
+                    let e = timeToMinutes(c.endTime);
+                    if (e < timeToMinutes(c.startTime)) e += 24 * 60;
+                    return Math.max(max, e);
+                }, 0);
+                const windowEnd = Math.min(latestEnd, 15 * 60);
+                if (windowEnd > sevenAM) {
+                    const ivs = validCases.map(c => {
+                        const st = timeToMinutes(c.startTime);
+                        let en = timeToMinutes(c.endTime); if (en < st) en += 24 * 60;
+                        return [Math.max(st, sevenAM), Math.min(en, windowEnd)];
+                    }).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+                    let covered = 0, curS = null, curE = null;
+                    ivs.forEach(([a, b]) => {
+                        if (curE === null || a > curE) { if (curE !== null) covered += curE - curS; curS = a; curE = b; }
+                        else curE = Math.max(curE, b);
+                    });
+                    if (curE !== null) covered += curE - curS;
+                    const availMinutes = (windowEnd - sevenAM) - covered;
+                    if (availMinutes > 0) breakdown.availability = (availMinutes / 60) * 4; // Always 4 pts/hr weekday rate
                 }
 
                 // Calculate case time (no compression needed for post-overnight, but we'll use it anyway)
@@ -2251,6 +2366,9 @@
             };
         }
 
+        // In-house availability rates (pts/hr) — +10% rule change Oct 2026
+        const INHOUSE_AVAIL_RATES = { weekday: 6.6, weeknight: 7.7, weekend: 8.8, holiday: 9.9 };
+
         function calculatePGABRPoints(data) {
             const breakdown = {
                 inhouseAvailability: 0,
@@ -2266,10 +2384,10 @@
             const isFriday = dayType.dayOfWeek === 5;
             
             if (isFriday) {
-                // Friday: 10 hours @ 6 pts/hr + 2 hours @ 8 pts/hr
-                breakdown.inhouseAvailability = (10 * 6) + (2 * 8); // 60 + 16 = 76
+                // Friday: 10 hours @ weekday rate + 2 hours @ weekend rate
+                breakdown.inhouseAvailability = (10 * INHOUSE_AVAIL_RATES.weekday) + (2 * INHOUSE_AVAIL_RATES.weekend); // 66 + 17.6 = 83.6
             } else {
-                breakdown.inhouseAvailability = 12 * 6;
+                breakdown.inhouseAvailability = 12 * INHOUSE_AVAIL_RATES.weekday;
             }
 
             // Calculate production time from supervised cases (always 3 pts/hr for PGA BR)
@@ -2356,16 +2474,16 @@
             const dayType = getDayType(data.date);
             
             if (data.isHoliday) {
-                availRate = 9;
+                availRate = INHOUSE_AVAIL_RATES.holiday;
                 prodRate = 6;
             } else if (data.shiftType === 'weeknight') {
-                availRate = 7;
+                availRate = INHOUSE_AVAIL_RATES.weeknight;
                 prodRate = 4;
             } else if (data.shiftType === 'weekend-day' || data.shiftType === 'weekend-night') {
-                availRate = 8;
+                availRate = INHOUSE_AVAIL_RATES.weekend;
                 prodRate = 5;
             } else {
-                availRate = 7;
+                availRate = INHOUSE_AVAIL_RATES.weeknight;
                 prodRate = 4;
             }
 
@@ -2427,13 +2545,13 @@
             const dayType = getDayType(data.date);
             
             if (data.isHoliday) {
-                availRate = 9;
+                availRate = INHOUSE_AVAIL_RATES.holiday;
                 prodRate = 6;
             } else if (dayType.isWeekend) {
-                availRate = 8;
+                availRate = INHOUSE_AVAIL_RATES.weekend;
                 prodRate = 5;
             } else {
-                availRate = 7;
+                availRate = INHOUSE_AVAIL_RATES.weeknight;
                 prodRate = 4;
             }
 
@@ -2582,6 +2700,16 @@
             
             const result = calculateSoloCasePoints(tempShiftData);
             
+            if (editingCaseId) {
+                const index = allCases.findIndex(c => c.id === editingCaseId);
+                if (index !== -1) allCases[index] = { ...tempShiftData, id: editingCaseId, points: result.totalPoints, breakdown: result.breakdown };
+                editingCaseId = null;
+                saveCases();
+                currentView = 'history';
+                render();
+                alert(`Case updated! ${result.totalPoints.toFixed(2)} points`);
+                return;
+            }
             allCases.push({
                 ...tempShiftData,
                 id: Date.now(),
@@ -2738,6 +2866,179 @@
             }
         }
 
+        // ==================== BACKUP / RESTORE ====================
+        const BACKUP_KEYS = ['ucpCases'];
+        const BACKUP_META_KEY = 'ucpLastBackup';
+
+        function renderBackupCard() {
+            const last = localStorage.getItem(BACKUP_META_KEY);
+            const days = last ? Math.floor((Date.now() - new Date(last).getTime()) / 86400000) : null;
+            const lastText = last ? new Date(last).toLocaleDateString() : 'Never';
+            const remind = (days === null || days >= 7) && allCases.length > 0;
+            return `
+                <div class="card">
+                    <h3 style="margin-bottom: 12px;">💾 Backup</h3>
+                    <p style="font-size: 13px; color: #666; margin-bottom: 12px;">Last backup: ${lastText}</p>
+                    ${remind ? `<p style="font-size: 13px; color: #b7791f; margin-bottom: 12px;">It's been ${days === null ? 'a while' : days + ' days'} — consider exporting a backup.</p>` : ''}
+                    <button class="btn btn-secondary" onclick="exportBackup()">Export Backup</button>
+                    <button class="btn btn-secondary" style="margin-top: 8px;" onclick="document.getElementById('ucpImportInput').click()">Import Backup</button>
+                    <input type="file" id="ucpImportInput" accept="application/json,.json,text/csv,.csv" style="display:none" onchange="importBackup(this)">
+                    <button class="btn btn-secondary" style="margin-top: 8px;" onclick="recalcHistory()">Recalculate history with current rules</button>
+                </div>
+            `;
+        }
+
+        function exportBackup() {
+            const data = {};
+            BACKUP_KEYS.forEach(k => { const v = localStorage.getItem(k); if (v !== null) data[k] = v; });
+            const payload = { app: 'ucp-tracker', version: 1, exportedAt: new Date().toISOString(), data };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const d = new Date();
+            const name = `ucp-backup-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.json`;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = name;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            localStorage.setItem(BACKUP_META_KEY, new Date().toISOString());
+            render();
+        }
+
+
+        // ==================== RECALCULATE HISTORY ====================
+        const RECALC_FUNCS = {
+            'solo': d => calculateSoloCasePoints(d),
+            'phd-supervise': d => calculatePHDSupervisePoints(d),
+            'partial-day': d => calculatePartialDayPoints(d),
+            'pga-br': d => calculatePGABRPoints(d),
+            'pga-ob': d => calculatePGAOBPoints(d),
+            'phd-trauma': d => calculatePHDTraumaPoints(d),
+            'flat-fee': d => calculateFlatFeePoints(d),
+            'low-census': d => ({ totalPoints: 16, breakdown: { availability: 16 } })
+        };
+
+        function computeRecalcPlan() {
+            const changes = [], skipped = [];
+            let oldTotal = 0, newTotal = 0;
+            allCases.forEach((c, i) => {
+                const oldPts = Number(c.points) || 0;
+                oldTotal += oldPts;
+                const fn = RECALC_FUNCS[c.mode];
+                let res = null, reason = '';
+                if (!fn) reason = c.mode ? `unknown mode "${c.mode}"` : 'no stored inputs (mode missing)';
+                else {
+                    try {
+                        res = fn(JSON.parse(JSON.stringify(c)));
+                        if (!res || typeof res.totalPoints !== 'number' || !isFinite(res.totalPoints)) { res = null; reason = 'calculation returned no valid points'; }
+                    } catch (e) { res = null; reason = 'calculation error: ' + e.message; }
+                }
+                if (!res) { skipped.push({ i, id: c.id, date: c.date, mode: c.mode || '?', points: oldPts, reason }); newTotal += oldPts; return; }
+                const newPts = Math.round(res.totalPoints * 100) / 100;
+                newTotal += newPts;
+                if (Math.abs(newPts - oldPts) > 0.005) changes.push({ i, id: c.id, date: c.date, mode: c.mode, oldPts, newPts, breakdown: res.breakdown });
+            });
+            return { changes, skipped, oldTotal, newTotal, count: allCases.length };
+        }
+
+        function recalcHistory() {
+            if (!allCases.length) { alert('No saved entries to recalculate.'); return null; }
+            exportBackup(); // safety backup first
+            const plan = computeRecalcPlan();
+            const rows = plan.changes.map(ch => `${ch.date} ${ch.mode}: ${ch.oldPts.toFixed(2)} → ${ch.newPts.toFixed(2)} (${ch.newPts - ch.oldPts >= 0 ? '+' : ''}${(ch.newPts - ch.oldPts).toFixed(2)})`);
+            const skips = plan.skipped.map(s => `${s.date || '?'} ${s.mode}: ${s.reason} (kept ${s.points.toFixed(2)})`);
+            const msg = `A backup file was downloaded first.\n\n${plan.changes.length} of ${plan.count} entries would change.\nTotal: ${plan.oldTotal.toFixed(2)} → ${plan.newTotal.toFixed(2)} (${plan.newTotal - plan.oldTotal >= 0 ? '+' : ''}${(plan.newTotal - plan.oldTotal).toFixed(2)})\n\n` +
+                (rows.length ? 'Changes:\n' + rows.slice(0, 40).join('\n') + (rows.length > 40 ? `\n…and ${rows.length - 40} more` : '') + '\n\n' : 'No point changes.\n\n') +
+                (skips.length ? `Left unchanged (can't recalculate):\n` + skips.join('\n') + '\n\n' : '') +
+                (plan.changes.length ? 'Apply these changes?' : '');
+            if (!plan.changes.length) { alert(msg); return plan; }
+            if (!confirm(msg)) return plan;
+            plan.changes.forEach(ch => { allCases[ch.i] = { ...allCases[ch.i], points: ch.newPts, breakdown: ch.breakdown }; });
+            saveCases(); render();
+            alert(`Updated ${plan.changes.length} entries. New total ${plan.newTotal.toFixed(2)}.`);
+            plan.applied = true;
+            return plan;
+        }
+
+        function applyBackup(text) {
+            const p = JSON.parse(text);
+            if (!p || p.app !== 'ucp-tracker' || typeof p.data !== 'object') throw new Error('Not a UCP Tracker backup file.');
+            const raw = p.data.ucpCases;
+            if (typeof raw !== 'string' || !Array.isArray(JSON.parse(raw))) throw new Error('Backup has no valid case list.');
+            const n = JSON.parse(raw).length;
+            if (!confirm(`Restore ${n} entries from ${p.exportedAt ? new Date(p.exportedAt).toLocaleString() : 'backup'}? This replaces all current data.`)) return false;
+            BACKUP_KEYS.forEach(k => { if (typeof p.data[k] === 'string') localStorage.setItem(k, p.data[k]); else localStorage.removeItem(k); });
+            loadCases();
+            render();
+            return true;
+        }
+
+        function parseCSV(text) {
+            const rows = []; let row = [], field = '', q = false;
+            text = text.replace(/^\uFEFF/, '');
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (q) {
+                    if (ch === '"') { if (text[i+1] === '"') { field += '"'; i++; } else q = false; }
+                    else field += ch;
+                } else if (ch === '"') q = true;
+                else if (ch === ',') { row.push(field); field = ''; }
+                else if (ch === '\n' || ch === '\r') {
+                    if (ch === '\r' && text[i+1] === '\n') i++;
+                    row.push(field); rows.push(row); row = []; field = '';
+                } else field += ch;
+            }
+            if (field !== '' || row.length) { row.push(field); rows.push(row); }
+            return rows.filter(r => r.some(f => f.trim() !== ''));
+        }
+
+        function parseCasesCSV(text) {
+            const rows = parseCSV(text);
+            if (!rows.length) throw new Error('CSV is empty.');
+            const idx = rows[0].map(h => h.trim()).indexOf('FullData');
+            if (idx < 0) throw new Error('CSV has no FullData column (not a UCP Tracker export).');
+            const entries = [], bad = [];
+            rows.slice(1).forEach((r, i) => {
+                try {
+                    const e = JSON.parse(r[idx]);
+                    if (!e || typeof e !== 'object' || e.id === undefined || !e.date || typeof e.points !== 'number') throw 0;
+                    entries.push(e);
+                } catch (_) { bad.push(i + 2); }
+            });
+            return { entries, bad };
+        }
+
+        function applyCSV(text) {
+            const { entries, bad } = parseCasesCSV(text);
+            if (!entries.length) throw new Error('No valid entries found in CSV.');
+            const have = new Set(allCases.map(c => String(c.id)));
+            const seen = new Set();
+            const fresh = entries.filter(e => { const k = String(e.id); if (have.has(k) || seen.has(k)) return false; seen.add(k); return true; });
+            const badNote = bad.length ? `\n${bad.length} malformed row(s) skipped (rows ${bad.join(', ')}).` : '';
+            let mode = null;
+            if (confirm(`CSV has ${entries.length} entries. ${fresh.length} are new, ${entries.length - fresh.length} already exist.${badNote}\n\nOK = MERGE (add ${fresh.length} new entries, keep current ${allCases.length})\nCancel = more options`)) mode = 'merge';
+            else if (confirm(`REPLACE all ${allCases.length} current entries with the ${entries.length} from this CSV? This cannot be undone.`)) mode = 'replace';
+            if (!mode) return false;
+            if (mode === 'merge') allCases = allCases.concat(fresh);
+            else { const s2 = new Set(); allCases = entries.filter(e => { const k = String(e.id); if (s2.has(k)) return false; s2.add(k); return true; }); }
+            saveCases(); loadCases(); render();
+            return mode;
+        }
+
+        function importBackup(input) {
+            const file = input.files && input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const isCSV = /\.csv$/i.test(file.name) || /^\uFEFF?\s*Date,/.test(reader.result);
+                    if (isCSV) { const m = applyCSV(reader.result); if (m) alert(m === 'merge' ? 'Entries merged!' : 'Entries replaced!'); }
+                    else if (applyBackup(reader.result)) alert('Backup restored!');
+                }
+                catch (e) { alert('Import failed: ' + e.message); }
+                input.value = '';
+            };
+            reader.readAsText(file);
+        }
+
         // ==================== HISTORY VIEW ====================
         
         function renderHistory() {
@@ -2758,6 +3059,7 @@
                             <button class="tab" onclick="currentView='rules'; render();">Rules</button>
                             <button class="tab" onclick="currentView='help'; render();">Help</button>
                         </div>
+                        ${renderBackupCard()}
                         <div style="text-align:center; color:#999; padding:40px;">No cases logged yet</div>
                     </div>
                 `;
@@ -2814,6 +3116,7 @@
                         <button class="tab" onclick="currentView='help'; render();">Help</button>
                     </div>
                     
+                    ${renderBackupCard()}
                     <!-- Quarterly Summary -->
                     <div class="stats-grid" style="margin-bottom: 20px;">
                         ${Object.keys(quarters).sort().reverse().slice(0, 4).map(key => {
@@ -2856,17 +3159,17 @@
                                                     ${c.lowCensus ? '<span class="badge badge-lowcensus">LOW CENSUS</span>' : ''}
                                                     ${c.isPostOvernight ? '<span class="badge" style="background: #9333ea;">POST-OVERNIGHT</span>' : ''}
                                                 </div>
-                                                <div class="history-points">${c.points.toFixed(2)} pts</div>
+                                                <div class="history-points">${(Number(c.points) || 0).toFixed(2)} pts</div>
                                             </div>
                                             <div class="history-details">
                                                 ${renderCaseDetails(c)}
                                             </div>
-                                            ${renderBreakdown(c.breakdown)}
+                                            ${renderBreakdown(c.breakdown || {})}
                                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px;">
                                                 ${canReopenCase(c) ? `
                                                     <button class="btn btn-secondary" onclick="reopenCase(${c.id})" 
                                                             style="padding: 12px;">
-                                                        Add More Cases
+                                                        ${c.mode === 'solo' ? 'Edit Case' : c.mode === 'flat-fee' ? 'Edit Procedures' : 'Add / Edit Cases'}
                                                     </button>
                                                 ` : '<div></div>'}
                                                 <button class="btn btn-danger" onclick="deleteCase(${c.id})" 
@@ -2886,7 +3189,7 @@
 
         function canReopenCase(caseData) {
             // Can only reopen modes that support multiple cases
-            return ['phd-supervise', 'pga-br', 'pga-ob', 'phd-trauma'].includes(caseData.mode);
+            return !!RECALC_FUNCS[caseData.mode] && caseData.mode !== 'low-census';
         }
 
         function reopenCase(id) {
@@ -2900,7 +3203,12 @@
             // Set up mode with existing data
             currentMode = caseData.mode;
             currentView = 'mode';
-            tempShiftData = { ...caseData };
+            tempShiftData = JSON.parse(JSON.stringify(caseData)); // deep copy so Back discards edits
+            const defaults = initializeModeData(caseData.mode) || {};
+            Object.keys(defaults).forEach(k => {
+                if (tempShiftData[k] === undefined || (Array.isArray(defaults[k]) && !Array.isArray(tempShiftData[k]))) tempShiftData[k] = defaults[k];
+            });
+            ['cases', 'epidurals', 'csections', 'procedures', 'items'].forEach(k => { if (tempShiftData[k] && !Array.isArray(tempShiftData[k])) tempShiftData[k] = []; });
             
             render();
         }
@@ -2932,6 +3240,10 @@
                 details.push(`${c.procedures.length} procedures`);
             }
 
+            if (c.mode === 'flat-fee' && Array.isArray(c.items)) {
+                details.push(c.items.map(it => `${it.qty}× ${it.desc || it.code}`).join(', '));
+            }
+
             return details.join(' • ');
         }
 
@@ -2960,7 +3272,7 @@
                 rows.push({ label: 'Procedures', value: breakdown.procedures });
             }
 
-            const total = Object.values(breakdown).reduce((sum, val) => sum + val, 0);
+            const total = Object.values(breakdown).reduce((sum, val) => sum + (Number(val) || 0), 0);
 
             return `
                 <div class="breakdown">
@@ -3070,10 +3382,16 @@
                         <h3 style="margin-bottom: 12px;">🏥 In-House Call Availability</h3>
                         <p style="margin-bottom: 8px; color: #666;">For ENTIRE shift (PGA BR, PGA OB, PHD Trauma):</p>
                         <div style="background: #f9f9fb; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
-                            • Weekday → <strong>6 pts/hr</strong><br>
-                            • Weeknight → <strong>7 pts/hr</strong><br>
-                            • Weekend → <strong>8 pts/hr</strong><br>
-                            • Holiday → <strong>9 pts/hr</strong>
+                            • Weekday → <strong>6.6 pts/hr</strong><br>
+                            • Weeknight → <strong>7.7 pts/hr</strong><br>
+                            • Weekend → <strong>8.8 pts/hr</strong><br>
+                            • Holiday → <strong>9.9 pts/hr</strong><br>
+                            <span style="font-size:12px;color:#888;">(Rates raised 10% Oct 2026; previously saved entries keep their original points.)</span>
+                        </div>
+
+                        <h3 style="margin-bottom: 12px;">🌙 Post-Overnight Day</h3>
+                        <div style="background: #f9f9fb; padding: 12px; border-radius: 6px; margin-bottom: 20px;">
+                            Availability (<strong>4 pts/hr</strong>) for gap time from <strong>07:00</strong> until your last case ends or <strong>15:00</strong>, whichever is earlier. No availability after your last case.
                         </div>
 
                         <h3 style="margin-bottom: 12px;">💉 In-House Production</h3>
@@ -3127,6 +3445,7 @@
                         <button class="tab active">Help</button>
                     </div>
 
+                    ${renderBackupCard()}
                     <div class="card">
                         <h3 style="margin-bottom: 12px;">📱 Add to Home Screen (iOS)</h3>
                         <p style="line-height: 1.6; margin-bottom: 16px;">Make this tracker feel like a real app:</p>
@@ -3298,7 +3617,8 @@
                 'pga-br': 'PGA BR',
                 'pga-ob': 'PGA OB',
                 'phd-trauma': 'PHD Trauma',
-                'low-census': 'Low Census'
+                'low-census': 'Low Census',
+                'flat-fee': 'Flat Fee'
             };
             return labels[mode] || mode;
         }
